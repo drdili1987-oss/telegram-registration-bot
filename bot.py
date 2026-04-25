@@ -2,6 +2,8 @@ import os
 import json
 import logging
 import asyncio
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
 from telegram import (
     Update,
@@ -296,16 +298,33 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Notogri buyruq. Royxatdan otish uchun /start yuboring."
-    )
+# ─── Health Check Server ───────────────────────────────────────────────────────
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+    def log_message(self, format, *args):
+        # Loglarni kamaytirish uchun bo'sh qoldiramiz
+        return
+
+def run_health_check():
+    port = int(os.environ.get("PORT", 8000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    logger.info(f"Health check server started on port {port}")
+    server.serve_forever()
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     ensure_dirs()
+    
+    # Render uchun health check serverni alohida thread da ishga tushiramiz
+    threading.Thread(target=run_health_check, daemon=True).start()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
