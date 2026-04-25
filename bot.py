@@ -102,7 +102,11 @@ async def notify_admin(context: ContextTypes.DEFAULT_TYPE, record: dict, photo_p
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
-    await update.message.reply_text(
+    message = update.effective_message
+    if not message:
+        return ConversationHandler.END
+
+    await message.reply_text(
         "👋 Assalomu alaykum!\n\n"
         "Kursga ro'yxatdan o'tish uchun bir necha savollarga javob bering.\n\n"
         "Iltimos, to'liq *Ism-Familiyangizni* kiriting:\n"
@@ -112,17 +116,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return FIO
 
 
+
 # ─── FIO ──────────────────────────────────────────────────────────────────────
 
 async def get_fio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    fio = update.message.text.strip()
+    message = update.effective_message
+    if not message or not message.text:
+        return FIO
+        
+    fio = message.text.strip()
 
     if len(fio.split()) < 2:
-        await update.message.reply_text(
+        await message.reply_text(
             "Iltimos, to'liq ism-sharifingizni kiriting "
             "(kamida ism va familiya)."
         )
         return FIO
+
 
     context.user_data["fio"] = fio
 
@@ -131,7 +141,7 @@ async def get_fio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         [[contact_button]], resize_keyboard=True, one_time_keyboard=True
     )
 
-    await update.message.reply_text(
+    await message.reply_text(
         f"Rahmat, *{fio}*!\n\n"
         "Endi telefon raqamingizni yuboring.\n"
         "Quyidagi tugmani bosing yoki raqamni qo'lda kiriting "
@@ -142,27 +152,35 @@ async def get_fio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return PHONE
 
 
+
 # ─── PHONE ────────────────────────────────────────────────────────────────────
 
 async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message.contact:
-        phone = update.message.contact.phone_number
+    message = update.effective_message
+    if not message:
+        return PHONE
+
+    if message.contact:
+        phone = message.contact.phone_number
         if not phone.startswith("+"):
             phone = "+" + phone
-    else:
-        phone = update.message.text.strip()
+    elif message.text:
+        phone = message.text.strip()
         digits = phone.replace("+", "").replace(" ", "").replace("-", "")
         if not digits.isdigit() or len(digits) < 9:
-            await update.message.reply_text(
+            await message.reply_text(
                 "Telefon raqam noto'g'ri formatda. Iltimos qaytadan kiriting.\n"
                 "_(Masalan: +998901234567)_",
                 parse_mode="Markdown",
             )
             return PHONE
+    else:
+        return PHONE
+
 
     context.user_data["phone"] = phone
 
-    await update.message.reply_text(
+    await message.reply_text(
         "Telefon raqam qabul qilindi!\n\n"
         "*Pasportingizning rasmini* yuboring:\n"
         "_(Passport barcha ma'lumotlari aniq ko'rinib turishi kerak)_",
@@ -172,17 +190,20 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return PASSPORT
 
 
+
 # ─── PASSPORT ─────────────────────────────────────────────────────────────────
 
 async def get_passport(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message.photo:
-        await update.message.reply_text(
+    message = update.effective_message
+    if not message or not message.photo:
+        await message.reply_text(
             "Iltimos, faqat *rasm* yuboring (hujjat emas).",
             parse_mode="Markdown",
         )
         return PASSPORT
 
-    photo     = update.message.photo[-1]
+    photo     = message.photo[-1]
+
     file      = await context.bot.get_file(photo.file_id)
     user_id   = update.effective_user.id
     fio_slug  = context.user_data["fio"].replace(" ", "_")
@@ -204,7 +225,7 @@ async def get_passport(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     logger.info("Yangi o'quvchi: %s", record["fio"])
 
     # Foydalanuvchiga tasdiqlash
-    await update.message.reply_text(
+    await message.reply_text(
         "*Tabriklaymiz!* Ro'yxatdan muvaffaqiyatli o'tdingiz.\n\n"
         f"*Ism:* {record['fio']}\n"
         f"*Telefon:* {record['phone']}\n"
@@ -212,6 +233,7 @@ async def get_passport(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         "Tez orada siz bilan bog'lanamiz!",
         parse_mode="Markdown",
     )
+
 
     # Adminga bildirishnoma + passport rasmi
     try:
@@ -290,12 +312,27 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
-    await update.message.reply_text(
-        "Royxatdan otish bekor qilindi.\n"
-        "Qaytadan boshlash uchun /start buyrug'ini yuboring.",
-        reply_markup=ReplyKeyboardRemove(),
-    )
+    message = update.effective_message
+    if message:
+        await message.reply_text(
+            "Ro'yxatdan o'tish bekor qilindi.\n"
+            "Qaytadan boshlash uchun /start buyrug'ini yuboring.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
     return ConversationHandler.END
+
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Noma'lum buyruq kelganda javob berish."""
+    if update.effective_message:
+        await update.effective_message.reply_text("Kechirasiz, bunday buyruqni bilmayman. Iltimos /start buyrug'idan foydalaning.")
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Xatoliklarni log qilish."""
+    logger.error("Update '%s' caused error '%s'", update, context.error)
+
+
 
 
 # ─── Health Check Server ───────────────────────────────────────────────────────
@@ -342,8 +379,11 @@ def main():
     app.add_handler(CommandHandler("count",  cmd_count))
     app.add_handler(CommandHandler("export", cmd_export))
     app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+    
+    app.add_error_handler(error_handler)
 
     logger.info("Bot ishga tushdi... Toqtatish uchun Ctrl+C bosing.")
+
 
     # Python 3.14 uchun event loop fix
     loop = asyncio.new_event_loop()
